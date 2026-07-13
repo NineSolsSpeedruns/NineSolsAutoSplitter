@@ -460,6 +460,8 @@ startup
   settings.SetToolTip("memories_start", "For starting timer when starting a boss fight in Memories of Battle mode");
   settings.Add("memories_reset", false, "Reset on Memories of Battle retry");
   settings.SetToolTip("memories_reset", "For resetting timer when dying or pressing Retry in Memories of Battle (ILs)");
+  settings.Add("cutscene_skip", false, "SpeedrunCutsceneSkip Mod Support");
+  settings.SetToolTip("cutscene_skip", "Add time for cutscenes skipped by SpeedrunCutsceneSkip mod");
 
   settings.Add("ability_obtain", true, "Split on obtaining ability");
   foreach (var ability in vars.abilities) { 
@@ -548,6 +550,20 @@ init
       {
           print("Active scene is loading scene. Won't try to start now.");
           return false;
+      }
+      
+      try {
+        if(settings["cutscene_skip"]) {
+          var SpeedrunCutsceneSkip_Class = mono.GetClass("SpeedrunCutsceneSkip", "SpeedrunCutsceneSkip");
+          vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_SkippedCutscenesCount");
+          vars.Helper["CutsceneSkipMod_TimeToAdd"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_TimeToAdd");
+          print("Tried to read time to add");
+          vars.CutsceneSkipModTimeAdded = 0.0f;
+        }
+        vars.CutsceneSkipModIsLoaded = true;
+      }
+      catch {
+        vars.CutsceneSkipModIsLoaded = false;
       }
       
       vars.cameraManagerInitialized = false;
@@ -708,6 +724,10 @@ onStart {
 
   vars.fileSelectStartTimer = new System.Diagnostics.Stopwatch();
   vars.fileSelectStartTimer.Start();
+  
+  if(vars.CutsceneSkipModIsLoaded && settings["cutscene_skip"]) {
+    vars.SkippedCutscenesCount = vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"].Current;
+  }
 }
 
 isLoading
@@ -867,6 +887,19 @@ split {
 
     return false;
 }
+
+gameTime {
+    if(vars.CutsceneSkipModIsLoaded && settings["cutscene_skip"]) {
+      if(vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"].Current != vars.SkippedCutscenesCount) {
+        print("Adding time to game time:" + vars.Helper["CutsceneSkipMod_TimeToAdd"].Current);
+        vars.SkippedCutscenesCount = vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"].Current;
+        return timer.CurrentTime.GameTime.Value.Add(TimeSpan.FromSeconds(vars.Helper["CutsceneSkipMod_TimeToAdd"].Current));
+      }
+    }
+
+    return null;
+}
+
 /*
 Scenes:
 0 - Blank / Load
