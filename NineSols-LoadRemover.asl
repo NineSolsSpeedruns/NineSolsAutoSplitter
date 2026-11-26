@@ -543,8 +543,6 @@ init
       var GameCore = mono["GameCore",1];
       var ApplicationUIGroupManager = mono["ApplicationUIGroupManager", 1];
       var SaveManager = mono["SaveManager",1];
-      var ConfigManager = mono["ConfigManager", 1];
-      var CheatManager = mono["CheatManager", 1];
 
       if(vars.Helper.Scenes.Active.Index == 0)
       {
@@ -552,18 +550,21 @@ init
           return false;
       }
       
+      vars.CutsceneSkipModIsLoaded = false;
+      vars.CutsceneSkipFailedToLoad = false;
       try {
         if(settings["cutscene_skip"]) {
           var SpeedrunCutsceneSkip_Class = mono.GetClass("SpeedrunCutsceneSkip", "SpeedrunCutsceneSkip");
           vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_SkippedCutscenesCount");
           vars.Helper["CutsceneSkipMod_TimeToAdd"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_TimeToAdd");
-          print("Tried to read time to add");
           vars.CutsceneSkipModTimeAdded = 0.0f;
+          vars.CutsceneSkipModIsLoaded = true;
+          print("Cutscene skip mod loaded succesfully");
         }
-        vars.CutsceneSkipModIsLoaded = true;
       }
       catch {
-        vars.CutsceneSkipModIsLoaded = false;
+        vars.CutsceneSkipFailedToLoad = true;
+        print("Failed to load classes from SpeedrunCutsceneSkip mod. Time for skipped cutscenes will not be added back to the timer. Is the mod installed correctly?");
       }
       
       vars.cameraManagerInitialized = false;
@@ -606,21 +607,29 @@ init
       vars.mobFlagExists = false;
       vars.FoundFlags = new HashSet<string>();
       vars.FoundMerchandiseData = new HashSet<string>();
+      var flagCount = 0;
       foreach(IntPtr FlagPtr in AllFlags) {
+         flagCount++;
          if(FlagPtr == IntPtr.Zero) {
              print("Flag was null. Waiting for all flags to be initialized before starting");
              return false;
          }
 
+         var finalSaveIDLength = vars.Helper.Read<int>(FlagPtr + 0x20, 0x10);
          IntPtr finalSaveIDPtr = vars.Helper.Read<IntPtr>(FlagPtr + 0x20);
-         if(finalSaveIDPtr == IntPtr.Zero)
-         {
+         if(finalSaveIDPtr == IntPtr.Zero) {
              print("Flag was not initialized. Waiting for all flags to be initialized before starting.");
              return false;
          }
          
          //GameFlagBase._finalSaveID
-         string finalSaveID = vars.Helper.ReadString(256, ReadStringType.AutoDetect, FlagPtr + 0x20, 0x14);
+         var bytesToRead = finalSaveIDLength * 2; // UTF-16 characters are 2 bytes
+         string finalSaveID = vars.Helper.ReadString(bytesToRead, ReadStringType.UTF16, FlagPtr + 0x20, 0x14);
+
+         if(finalSaveID == null) {
+             print("Final save id was null for flag: " + flagCount);
+             return false;
+         }
          
          if(vars.gameFlags.ContainsKey(finalSaveID)) {
             string className = vars.gameFlags[finalSaveID].Item3;
@@ -732,13 +741,19 @@ onStart {
 
 isLoading
 {
-  return (vars.Helper["loadingscreen"].Current 
-  || (vars.Helper["gamestate"].Current == 2) 
-  || (current.SceneIndex == 0)
-  || (current.SceneIndex == 72) 
-  || (current.SceneIndex == 7)
-  || (current.SceneIndex == 1 && vars.Helper["blackCoverOpacity"].Current > 0.99f)
-  || (current.SceneIndex == 1 && vars.fileSelectStartTimer.ElapsedMilliseconds < 1000));
+  try {
+    return (vars.Helper["loadingscreen"].Current 
+    || (vars.Helper["gamestate"].Current == 2) 
+    || (current.SceneIndex == 0)
+    || (current.SceneIndex == 72) 
+    || (current.SceneIndex == 7)
+    || (current.SceneIndex == 1 && vars.Helper["blackCoverOpacity"].Current > 0.99f)
+    || (current.SceneIndex == 1 && vars.fileSelectStartTimer.ElapsedMilliseconds < 1000));
+  }
+  catch {
+    // If we can't read the Helper variables, the game is likely not running, don't pause the timer
+    return false;
+  }
 }
 
 update
@@ -817,6 +832,24 @@ update
       // MonsterManager not loaded yet
     }
   }
+  
+  if(settings["cutscene_skip"] && !vars.CutsceneSkipModIsLoaded && !vars.CutsceneSkipFailedToLoad) {
+    vars.CutsceneSkipModIsLoaded = false;
+    vars.CutsceneSkipFailedToLoad = false;
+    try {
+      var SpeedrunCutsceneSkip_Class = vars.mono.GetClass("SpeedrunCutsceneSkip", "SpeedrunCutsceneSkip");
+      vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_SkippedCutscenesCount");
+      vars.Helper["CutsceneSkipMod_TimeToAdd"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_TimeToAdd");
+      vars.CutsceneSkipModTimeAdded = 0.0f;
+      vars.CutsceneSkipModIsLoaded = true;
+      print("Cutscene skip mod loaded succesfully");
+    }
+    catch {
+      // Failed to load cutscene skip classes, mod is likely not installed. Don't try to load it again.
+      vars.CutsceneSkipFailedToLoad = true;
+      print("Failed to load classes from SpeedrunCutsceneSkip mod. Time for skipped cutscenes will not be added back to the timer. Is the mod installed correctly?");
+    }
+  }
 }
 
 reset 
@@ -886,6 +919,11 @@ split {
     }
 
     return false;
+}
+
+exit {
+    // Unpauses Game Time so it keeps counting while the game is closed
+    timer.IsGameTimePaused = false;
 }
 
 gameTime {
