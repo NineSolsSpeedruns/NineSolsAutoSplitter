@@ -543,8 +543,6 @@ init
       var GameCore = mono["GameCore",1];
       var ApplicationUIGroupManager = mono["ApplicationUIGroupManager", 1];
       var SaveManager = mono["SaveManager",1];
-      var ConfigManager = mono["ConfigManager", 1];
-      var CheatManager = mono["CheatManager", 1];
 
       if(vars.Helper.Scenes.Active.Index == 0)
       {
@@ -609,21 +607,29 @@ init
       vars.mobFlagExists = false;
       vars.FoundFlags = new HashSet<string>();
       vars.FoundMerchandiseData = new HashSet<string>();
+      var flagCount = 0;
       foreach(IntPtr FlagPtr in AllFlags) {
+         flagCount++;
          if(FlagPtr == IntPtr.Zero) {
              print("Flag was null. Waiting for all flags to be initialized before starting");
              return false;
          }
 
+         var finalSaveIDLength = vars.Helper.Read<int>(FlagPtr + 0x20, 0x10);
          IntPtr finalSaveIDPtr = vars.Helper.Read<IntPtr>(FlagPtr + 0x20);
-         if(finalSaveIDPtr == IntPtr.Zero)
-         {
+         if(finalSaveIDPtr == IntPtr.Zero) {
              print("Flag was not initialized. Waiting for all flags to be initialized before starting.");
              return false;
          }
          
          //GameFlagBase._finalSaveID
-         string finalSaveID = vars.Helper.ReadString(256, ReadStringType.AutoDetect, FlagPtr + 0x20, 0x14);
+         var bytesToRead = finalSaveIDLength * 2; // UTF-16 characters are 2 bytes
+         string finalSaveID = vars.Helper.ReadString(bytesToRead, ReadStringType.UTF16, FlagPtr + 0x20, 0x14);
+
+         if(finalSaveID == null) {
+             print("Final save id was null for flag: " + flagCount);
+             return false;
+         }
          
          if(vars.gameFlags.ContainsKey(finalSaveID)) {
             string className = vars.gameFlags[finalSaveID].Item3;
