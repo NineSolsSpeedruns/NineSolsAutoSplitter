@@ -552,18 +552,21 @@ init
           return false;
       }
       
+      vars.CutsceneSkipModIsLoaded = false;
+      vars.CutsceneSkipFailedToLoad = false;
       try {
         if(settings["cutscene_skip"]) {
           var SpeedrunCutsceneSkip_Class = mono.GetClass("SpeedrunCutsceneSkip", "SpeedrunCutsceneSkip");
           vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_SkippedCutscenesCount");
           vars.Helper["CutsceneSkipMod_TimeToAdd"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_TimeToAdd");
-          print("Tried to read time to add");
           vars.CutsceneSkipModTimeAdded = 0.0f;
+          vars.CutsceneSkipModIsLoaded = true;
+          print("Cutscene skip mod loaded succesfully");
         }
-        vars.CutsceneSkipModIsLoaded = true;
       }
       catch {
-        vars.CutsceneSkipModIsLoaded = false;
+        vars.CutsceneSkipFailedToLoad = true;
+        print("Failed to load classes from SpeedrunCutsceneSkip mod. Time for skipped cutscenes will not be added back to the timer. Is the mod installed correctly?");
       }
       
       vars.cameraManagerInitialized = false;
@@ -732,13 +735,19 @@ onStart {
 
 isLoading
 {
-  return (vars.Helper["loadingscreen"].Current 
-  || (vars.Helper["gamestate"].Current == 2) 
-  || (current.SceneIndex == 0)
-  || (current.SceneIndex == 72) 
-  || (current.SceneIndex == 7)
-  || (current.SceneIndex == 1 && vars.Helper["blackCoverOpacity"].Current > 0.99f)
-  || (current.SceneIndex == 1 && vars.fileSelectStartTimer.ElapsedMilliseconds < 1000));
+  try {
+    return (vars.Helper["loadingscreen"].Current 
+    || (vars.Helper["gamestate"].Current == 2) 
+    || (current.SceneIndex == 0)
+    || (current.SceneIndex == 72) 
+    || (current.SceneIndex == 7)
+    || (current.SceneIndex == 1 && vars.Helper["blackCoverOpacity"].Current > 0.99f)
+    || (current.SceneIndex == 1 && vars.fileSelectStartTimer.ElapsedMilliseconds < 1000));
+  }
+  catch {
+    // If we can't read the Helper variables, the game is likely not running, don't pause the timer
+    return false;
+  }
 }
 
 update
@@ -817,6 +826,24 @@ update
       // MonsterManager not loaded yet
     }
   }
+  
+  if(settings["cutscene_skip"] && !vars.CutsceneSkipModIsLoaded && !vars.CutsceneSkipFailedToLoad) {
+    vars.CutsceneSkipModIsLoaded = false;
+    vars.CutsceneSkipFailedToLoad = false;
+    try {
+      var SpeedrunCutsceneSkip_Class = vars.mono.GetClass("SpeedrunCutsceneSkip", "SpeedrunCutsceneSkip");
+      vars.Helper["CutsceneSkipMod_SkippedCutscenesCount"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_SkippedCutscenesCount");
+      vars.Helper["CutsceneSkipMod_TimeToAdd"] = SpeedrunCutsceneSkip_Class.Make<float>("Instance", "LivesplitHook_TimeToAdd");
+      vars.CutsceneSkipModTimeAdded = 0.0f;
+      vars.CutsceneSkipModIsLoaded = true;
+      print("Cutscene skip mod loaded succesfully");
+    }
+    catch {
+      // Failed to load cutscene skip classes, mod is likely not installed. Don't try to load it again.
+      vars.CutsceneSkipFailedToLoad = true;
+      print("Failed to load classes from SpeedrunCutsceneSkip mod. Time for skipped cutscenes will not be added back to the timer. Is the mod installed correctly?");
+    }
+  }
 }
 
 reset 
@@ -886,6 +913,11 @@ split {
     }
 
     return false;
+}
+
+exit {
+    // Unpauses Game Time so it keeps counting while the game is closed
+    timer.IsGameTimePaused = false;
 }
 
 gameTime {
